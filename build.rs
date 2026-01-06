@@ -53,9 +53,12 @@ fn main() {
     let arch_win = if target_arch == "aarch64" { "arm64" } else { "x64" };
     let arch_lnx = if target_arch == "aarch64" { "arm64" } else { "amd64" };
 
+    let custom_linux_url = "https://github.com/gengshenchen/qml-video-rs/releases/download/linux_mdk/mdk-sdk-linux.tar.xz";
+
     let sdk: HashMap<&str, (String, String, &str, &str)> = vec![
         ("windows",  (format!("https://master.dl.sourceforge.net/project/mdk-sdk/{}mdk-sdk-windows-desktop-clang.7z?viasf=1", nightly),  format!("lib/{arch_win}/"),    "mdk.lib",    "include/")),
-        ("linux",    (format!("https://master.dl.sourceforge.net/project/mdk-sdk/{}mdk-sdk-linux.tar.xz?viasf=1", nightly),              format!("lib/{arch_lnx}/"),    "libmdk.so",  "include/")),
+        ("linux",    (custom_linux_url.to_string(),                                                                                         format!("lib/{arch_lnx}/"),    "libmdk.so",  "include/")),
+        // ("linux",    (format!("https://master.dl.sourceforge.net/project/mdk-sdk/{}mdk-sdk-linux.tar.xz?viasf=1", nightly),              format!("lib/{arch_lnx}/"),    "libmdk.so",  "include/")),
         ("macos",    (format!("https://master.dl.sourceforge.net/project/mdk-sdk/{}mdk-sdk-macOS.tar.xz?viasf=1", nightly),              format!("lib/mdk.framework/"), "mdk",        "include/")),
         ("android",  (format!("https://master.dl.sourceforge.net/project/mdk-sdk/{}mdk-sdk-android.7z?viasf=1", nightly),                format!("lib/arm64-v8a/"),     "libmdk.so",  "include/")),
         ("ios",      (format!("https://master.dl.sourceforge.net/project/mdk-sdk/{}mdk-sdk-iOS.tar.xz?viasf=1", nightly),                format!("lib/mdk.framework/"), "mdk",        "include/")),
