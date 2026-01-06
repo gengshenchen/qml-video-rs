@@ -132,25 +132,51 @@ fn download_and_extract(url: &str, check: &str) -> Result<String, std::io::Error
         }
     }
     let out_dir = env::var("OUT_DIR").unwrap();
+    // [MODIFIED] Print debugging info
+    println!("cargo:warning=Downloading MDK SDK to: {}/mdk-sdk...", out_dir);
 
     if !Path::new(&format!("{}/mdk-sdk/{}", out_dir, check)).exists() && !Path::new(&format!("{}/mdk-sdk/{}", out_dir, check.replace("mdk.framework", "mdk.xcframework"))).exists() {
         let ext = if url.contains(".tar.xz") { ".tar.xz" } else { ".7z" };
+
+        let filename = format!("{}/mdk-sdk{}", out_dir, ext);
         {
-            let mut reader = ureq::get(url).call().map(|x| x.into_body().into_reader()).map_err(|_| std::io::ErrorKind::Other)?;
-            let mut file = File::create(format!("{}/mdk-sdk{}", out_dir, ext))?;
+            println!("cargo:warning=Fetching from URL: {}", url);
+            let mut reader = ureq::get(url).call().map(|x| x.into_body().into_reader()).map_err(|e| {
+                println!("cargo:warning=Download failed: {:?}", e);
+                std::io::ErrorKind::Other
+            })?;
+            let mut file = File::create(&filename)?;
             std::io::copy(&mut reader, &mut file)?;
         }
-        Command::new("7z").current_dir(&out_dir).args(&["x", "-y", &format!("mdk-sdk{}", ext)]).status()?;
-        std::fs::remove_file(format!("{}/mdk-sdk{}", out_dir, ext))?;
+
+        println!("cargo:warning=Extracting {}...", filename);
+
+        // [MODIFIED] Logic to handle different archive types correctly
         if ext == ".tar.xz" {
-            let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-            if target_os == "macos" || target_os == "ios" || target_os == "linux" {
-                Command::new("tar").current_dir(&out_dir).args(&["-xf", "mdk-sdk.tar"]).status()?;
-            } else {
-                Command::new("7z").current_dir(&out_dir).args(&["x", "-y", "mdk-sdk.tar"]).status()?;
+            // [MODIFIED] Use 'tar' directly for .tar.xz (Linux/macOS standard)
+            // This avoids the dependency on '7z' for these platforms and is more robust.
+            let status = Command::new("tar")
+                .current_dir(&out_dir)
+                .args(&["-xf", &format!("mdk-sdk{}", ext)])
+                .status()?;
+
+            if !status.success() {
+                return Err(std::io::Error::new(std::io::ErrorKind::Other, "tar extraction failed"));
             }
-            std::fs::remove_file(format!("{}/mdk-sdk.tar", out_dir))?;
+        } else {
+            // [MODIFIED] Use '7z' only for .7z files (Windows/Android)
+            let status = Command::new("7z")
+                .current_dir(&out_dir)
+                .args(&["x", "-y", &format!("mdk-sdk{}", ext)])
+                .status()?;
+
+            if !status.success() {
+                return Err(std::io::Error::new(std::io::ErrorKind::Other, "7z extraction failed"));
+            }
         }
+
+        // Cleanup archive file
+        let _ = std::fs::remove_file(filename);
     }
 
     Ok(format!("{}/mdk-sdk/", out_dir))
