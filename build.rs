@@ -127,7 +127,7 @@ fn main() {
         .build("src/lib.rs");
 
 }
-
+// [Start] 替换原来的 download_and_extract 函数
 fn download_and_extract(url: &str, check: &str) -> Result<String, std::io::Error> {
     if let Ok(path) = env::var("MDK_SDK") {
         if Path::new(&format!("{}/{}", path, check)).exists() {
@@ -135,8 +135,35 @@ fn download_and_extract(url: &str, check: &str) -> Result<String, std::io::Error
         }
     }
     let out_dir = env::var("OUT_DIR").unwrap();
-    // [MODIFIED] Print debugging info
     println!("cargo:warning=Downloading MDK SDK to: {}/mdk-sdk...", out_dir);
+
+    // ------------------------------------------------------------------
+    // [修复开始] 显式检测代理并配置 ureq Agent
+    // ------------------------------------------------------------------
+    let proxy_url = std::env::var("https_proxy")
+        .or_else(|_| std::env::var("HTTPS_PROXY"))
+        .or_else(|_| std::env::var("http_proxy"))
+        .or_else(|_| std::env::var("HTTP_PROXY"))
+        .or_else(|_| std::env::var("all_proxy"))
+        .or_else(|_| std::env::var("ALL_PROXY"))
+        .ok();
+
+    let mut agent_builder = ureq::Agent::config_builder();
+
+    if let Some(proxy_str) = proxy_url {
+        println!("cargo:warning=检测到代理设置，正在应用: {}", proxy_str);
+        // ureq 3.x 使用 Proxy::new 来创建代理配置
+        if let Ok(proxy) = ureq::Proxy::new(proxy_str) {
+            agent_builder = agent_builder.proxy(Some(proxy));
+        } else {
+            println!("cargo:warning=代理地址格式错误，将尝试直连");
+        }
+    }
+
+    let agent = agent_builder.build();
+    // ------------------------------------------------------------------
+    // [修复结束]
+    // ------------------------------------------------------------------
 
     if !Path::new(&format!("{}/mdk-sdk/{}", out_dir, check)).exists() && !Path::new(&format!("{}/mdk-sdk/{}", out_dir, check.replace("mdk.framework", "mdk.xcframework"))).exists() {
         let ext = if url.contains(".tar.xz") { ".tar.xz" } else { ".7z" };
@@ -144,7 +171,8 @@ fn download_and_extract(url: &str, check: &str) -> Result<String, std::io::Error
         let filename = format!("{}/mdk-sdk{}", out_dir, ext);
         {
             println!("cargo:warning=Fetching from URL: {}", url);
-            let mut reader = ureq::get(url).call().map(|x| x.into_body().into_reader()).map_err(|e| {
+            // [修改] 使用 agent.get 替代 ureq::get
+            let mut reader = agent.get(url).call().map(|x| x.into_body().into_reader()).map_err(|e| {
                 println!("cargo:warning=Download failed: {:?}", e);
                 std::io::ErrorKind::Other
             })?;
@@ -154,10 +182,7 @@ fn download_and_extract(url: &str, check: &str) -> Result<String, std::io::Error
 
         println!("cargo:warning=Extracting {}...", filename);
 
-        // [MODIFIED] Logic to handle different archive types correctly
         if ext == ".tar.xz" {
-            // [MODIFIED] Use 'tar' directly for .tar.xz (Linux/macOS standard)
-            // This avoids the dependency on '7z' for these platforms and is more robust.
             let status = Command::new("tar")
                 .current_dir(&out_dir)
                 .args(&["-xf", &format!("mdk-sdk{}", ext)])
@@ -167,7 +192,6 @@ fn download_and_extract(url: &str, check: &str) -> Result<String, std::io::Error
                 return Err(std::io::Error::new(std::io::ErrorKind::Other, "tar extraction failed"));
             }
         } else {
-            // [MODIFIED] Use '7z' only for .7z files (Windows/Android)
             let status = Command::new("7z")
                 .current_dir(&out_dir)
                 .args(&["x", "-y", &format!("mdk-sdk{}", ext)])
@@ -178,9 +202,66 @@ fn download_and_extract(url: &str, check: &str) -> Result<String, std::io::Error
             }
         }
 
-        // Cleanup archive file
         let _ = std::fs::remove_file(filename);
     }
 
     Ok(format!("{}/mdk-sdk/", out_dir))
 }
+// [End] 替换结束
+
+// fn download_and_extract(url: &str, check: &str) -> Result<String, std::io::Error> {
+//     if let Ok(path) = env::var("MDK_SDK") {
+//         if Path::new(&format!("{}/{}", path, check)).exists() {
+//             return Ok(path);
+//         }
+//     }
+//     let out_dir = env::var("OUT_DIR").unwrap();
+//     // [MODIFIED] Print debugging info
+//     println!("cargo:warning=Downloading MDK SDK to: {}/mdk-sdk...", out_dir);
+
+//     if !Path::new(&format!("{}/mdk-sdk/{}", out_dir, check)).exists() && !Path::new(&format!("{}/mdk-sdk/{}", out_dir, check.replace("mdk.framework", "mdk.xcframework"))).exists() {
+//         let ext = if url.contains(".tar.xz") { ".tar.xz" } else { ".7z" };
+
+//         let filename = format!("{}/mdk-sdk{}", out_dir, ext);
+//         {
+//             println!("cargo:warning=Fetching from URL: {}", url);
+//             let mut reader = ureq::get(url).call().map(|x| x.into_body().into_reader()).map_err(|e| {
+//                 println!("cargo:warning=Download failed: {:?}", e);
+//                 std::io::ErrorKind::Other
+//             })?;
+//             let mut file = File::create(&filename)?;
+//             std::io::copy(&mut reader, &mut file)?;
+//         }
+
+//         println!("cargo:warning=Extracting {}...", filename);
+
+//         // [MODIFIED] Logic to handle different archive types correctly
+//         if ext == ".tar.xz" {
+//             // [MODIFIED] Use 'tar' directly for .tar.xz (Linux/macOS standard)
+//             // This avoids the dependency on '7z' for these platforms and is more robust.
+//             let status = Command::new("tar")
+//                 .current_dir(&out_dir)
+//                 .args(&["-xf", &format!("mdk-sdk{}", ext)])
+//                 .status()?;
+
+//             if !status.success() {
+//                 return Err(std::io::Error::new(std::io::ErrorKind::Other, "tar extraction failed"));
+//             }
+//         } else {
+//             // [MODIFIED] Use '7z' only for .7z files (Windows/Android)
+//             let status = Command::new("7z")
+//                 .current_dir(&out_dir)
+//                 .args(&["x", "-y", &format!("mdk-sdk{}", ext)])
+//                 .status()?;
+
+//             if !status.success() {
+//                 return Err(std::io::Error::new(std::io::ErrorKind::Other, "7z extraction failed"));
+//             }
+//         }
+
+//         // Cleanup archive file
+//         let _ = std::fs::remove_file(filename);
+//     }
+
+//     Ok(format!("{}/mdk-sdk/", out_dir))
+// }
